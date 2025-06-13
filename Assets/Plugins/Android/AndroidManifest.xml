@@ -17,7 +17,6 @@
     <meta-data android:name="com.oculus.telemetry.project_guid" android:value="02c5fa25-1af5-4a56-b992-23a1300154b0" />
   </application>
   <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="true" />
-  <uses-feature android:name="com.oculus.experimental.enabled" android:required="true" />
   <uses-permission android:name="com.oculus.permission.USE_ANCHOR_API" />
   <uses-permission android:name="com.oculus.permission.IMPORT_EXPORT_IOT_MAP_DATA" />
   <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="true" />

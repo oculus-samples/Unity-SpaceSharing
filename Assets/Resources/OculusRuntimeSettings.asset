@@ -20,5 +20,7 @@ MonoBehaviour:
   telemetryProjectGuid: 02c5fa25-1af5-4a56-b992-23a1300154b0
   bodyTrackingFidelity: 1
   bodyTrackingJointSet: 0
+  allowVisibilityMesh: 0
+  QuestVisibilityMeshOverriden: 0
   <ApertureType>k__BackingField: 0
   <ApertureSize>k__BackingField: {x: 1, y: 1, z: 1}
