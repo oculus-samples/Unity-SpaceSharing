@@ -374,7 +374,7 @@ public class MRSceneManager : MonoBehaviour
             if (uuid == curRoom.Anchor.Uuid)
             {
                 Sampleton.Log($"+ current room: {uuid}");
-                // our Photon packeteer wants the first room id to be the current room the host is in:
+                // our Photon impl. wants the first room id to be the current room the host is in:
                 (roomIds[0], roomIds[i]) = (roomIds[i], roomIds[0]);
             }
             else
@@ -390,8 +390,7 @@ public class MRSceneManager : MonoBehaviour
 
         if (Sampleton.ConnectMethod == ConnectMethod.Photon)
         {
-            Assert.IsNotNull(Sampleton.PhotonRoomManager, "Sampleton.PhotonRoomManager");
-            Sampleton.PhotonRoomManager.PublishRoomData(groupId, roomIds, floorPose);
+            PhotonRoomManager.PublishRoomData(groupId, roomIds, floorPose);
         }
 
         SetSharedSceneUuidsImpl(roomIds, groupId);

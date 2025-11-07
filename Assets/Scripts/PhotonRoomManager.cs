@@ -10,8 +10,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Assertions;
 
+using PeerStateValue = ExitGames.Client.Photon.PeerStateValue;
 using Hashtable = ExitGames.Client.Photon.Hashtable;
-using MemoryMarshal = System.Runtime.InteropServices.MemoryMarshal;
 
 
 /// <summary>
@@ -20,30 +20,292 @@ using MemoryMarshal = System.Runtime.InteropServices.MemoryMarshal;
 [RequireComponent(typeof(PhotonView))]
 public class PhotonRoomManager : MonoBehaviourPunCallbacks
 {
-    public static readonly RoomOptions RoomOptions = new()
+    //
+    // Public interface
+
+    public delegate void RoomDataUpdated(Guid groupId, Guid[] roomIds, Pose? floorPose, bool isLocal);
+    public delegate void CustomDataUpdated(object boxedData, bool isLocal);
+
+
+    public static event RoomDataUpdated OnRoomDataUpdated
     {
-        IsVisible = true,
-        IsOpen = true,
-        BroadcastPropsChangeToAll = true,
-        MaxPlayers = 0,       // no defined limit
-        EmptyRoomTtl = 60000, // 1 minute
-        PlayerTtl = 600000,   // 10 minutes
-    };
+        add
+        {
+            if (value is null)
+                return;
+
+            if (TryGetRoomData(out var group, out var rooms, out var floorPose, out bool isLocal))
+                value(group, rooms, floorPose, isLocal);
+
+            s_OnRoomDataUpdated += value;
+        }
+        remove => s_OnRoomDataUpdated -= value;
+    }
+
+    public static event CustomDataUpdated OnCustomDataUpdated
+    {
+        add
+        {
+            if (value is null)
+                return;
+
+            if (TryGetCustomData(out var boxedData, out bool isLocal))
+                value(boxedData, isLocal);
+
+            s_OnCustomDataUpdated += value;
+        }
+        remove => s_OnCustomDataUpdated -= value;
+    }
+
+    public static string CurrentRoomName
+        => PhotonNetwork.InRoom ? PhotonNetwork.CurrentRoom.Name
+                                : PhotonNetwork.InLobby ? $"{PhotonNetwork.CurrentLobby.Name} (lobby)"
+                                                        : "(none)";
+
+    public static bool CheckConnection(bool warn)
+    {
+        if (PhotonNetwork.IsConnected)
+            return true;
+        if (PhotonNetwork.ConnectUsingSettings() && warn)
+            Sampleton.Warn("PhotonNetwork was disconnected. Wait a few moments before trying again.");
+        else
+            Sampleton.Error("Cannot connect to PhotonNetwork with the app's configured settings.");
+        return false;
+    }
+
+    public static bool TryJoinLobby()
+    {
+        if (!PhotonNetwork.IsConnected)
+            return false;
+
+        s_LastLobby = new TypedLobby(Sampleton.CurrentScene.name, LobbyType.Default);
+
+        return PhotonNetwork.JoinLobby(s_LastLobby);
+    }
+
+    public static bool TryJoinRoom(string roomName)
+    {
+        var kRoomOptions = new RoomOptions()
+        {
+            IsVisible = true,
+            IsOpen = true,
+            BroadcastPropsChangeToAll = true,
+            MaxPlayers = 0,       // no defined limit
+            EmptyRoomTtl = 60000, // 1 minute
+            PlayerTtl = 600000,   // 10 minutes
+        };
+        return PhotonNetwork.JoinOrCreateRoom(roomName, kRoomOptions, s_LastLobby);
+    }
+
+    /// <param name="roomUuids">
+    ///     Note: The first element is expected to be the Anchor.Uuid of the host's "main" (or current) MRUKRoom.
+    /// </param>
+    /// <param name="floorPose">
+    ///     If provided and not null, must be the world pose of the floor anchor corresponding to the first MRUKRoom
+    ///     UUID in <paramref name="roomUuids"/> (from the publisher's perspective). This will allow MRUK to
+    ///     automatically perform colocated world alignment, enabling even non-anchor GameObjects to appear in the
+    ///     "correct" poses in the shared mixed reality space for all clients.
+    /// </param>
+    public static void PublishRoomData(Guid groupUuid, ICollection<Guid> roomUuids, Pose? floorPose = null)
+    {
+        if (floorPose is null)
+            Sampleton.Log($"{nameof(PublishRoomData)}: 1 group, {roomUuids.Count} room(s)");
+        else
+            Sampleton.Log($"{nameof(PublishRoomData)}: 1 group, {roomUuids.Count} room(s), 1 pose");
+
+        if (roomUuids.Count == 0)
+        {
+            Sampleton.Warn($"- (skipped ~ 0 rooms)");
+            return;
+        }
+
+        PrepareRoomPropertyUpdate(out var room, out var newProps, out var expected, out int version);
+
+        var roomArr = new Guid[roomUuids.Count];
+        roomUuids.CopyTo(roomArr, 0);
+
+        newProps[k_PropKeyRoomIds] = roomArr;
+        newProps[k_PropKeyGroupId] = groupUuid;
+
+        if (floorPose.HasValue)
+            newProps[k_PropKeyHostPose] = floorPose.Value;
+        else if (version > 0)
+            newProps[k_PropKeyHostPose] = null;
+
+        if (room.SetCustomProperties(newProps, expected))
+            s_LastVersion = version;
+        else
+            Sampleton.Error("- ERR: Photon room.SetCustomProperties failed! (possible concurrency failure)");
+    }
+
+    /// <param name="boxedData">
+    ///     MUST be serializable by Photon!
+    /// </param>
+    public static void PublishCustomData(object boxedData)
+    {
+        Sampleton.Log($"{nameof(PublishCustomData)}: {nameof(boxedData)}<{boxedData.SafeTypeName()}>");
+
+        PrepareRoomPropertyUpdate(out var room, out var newProps, out var expected, out int version);
+
+        newProps[k_PropKeyCustomData] = boxedData;
+
+        if (room.SetCustomProperties(newProps, expected))
+            s_LastVersion = version;
+        else
+            Sampleton.Error("- ERR: Photon room.SetCustomProperties failed! (possible concurrency failure)");
+    }
 
 
-    const string k_PubRoomsKey = "rooms";
-    const string k_LastPubberKey = "pubber";
-    const byte k_PacketFormat = 2;
-    const byte k_PacketFormatWithPose = 3;
-    const int k_PacketHeaderSz = sizeof(byte);
-    const int k_UuidSize = 16;
-    const int k_Pose3DSize = 7 * sizeof(float);
+    //
+    // Constants
+
+    const string k_PropKeyVersion = "ver";      // int
+    const string k_PropKeySender = "src";       // string
+    const string k_PropKeyGroupId = "group";    // System.Guid (works thanks to our PhotonExtensions.cs)
+    const string k_PropKeyRoomIds = "rooms";    // System.Guid[] (^) (first Guid = host's main room)
+    const string k_PropKeyHostPose = "pose";    // UnityEngine.Pose (^^) (can be omitted)
+    const string k_PropKeyCustomData = "data";  // any (listeners to OnCustomDataUpdated decide how to handle)
 
 
-    // Runtime fields
-    byte[] m_PacketBuf;
-    string m_LastRoomName;
+    //
+    // Fields
 
+    static TypedLobby s_LastLobby;
+
+    static string s_LastRoomName;
+
+    static int s_LastVersion = -1;
+
+    static RoomDataUpdated s_OnRoomDataUpdated = LogOnRoomDataUpdated;
+
+    static CustomDataUpdated s_OnCustomDataUpdated = LogOnCustomDataUpdated;
+
+
+    //
+    // impl.
+
+    static void PrepareRoomPropertyUpdate(out Room room, out Hashtable newProps, out Hashtable expectedProps, out int currentVersion)
+    {
+        room = PhotonNetwork.CurrentRoom;
+        Assert.IsNotNull(room, "PhotonNetwork.CurrentRoom");
+
+        currentVersion = 0;
+        expectedProps = null;
+
+        if (room.CustomProperties.TryGetValue(k_PropKeyVersion, out var box) && box is int v)
+        {
+            expectedProps = new Hashtable
+            {
+                [k_PropKeyVersion] = currentVersion = v,
+            };
+        }
+
+        newProps = new Hashtable
+        {
+            [k_PropKeyVersion] = currentVersion + 1,
+            [k_PropKeySender] = $"{PhotonNetwork.LocalPlayer}",
+        };
+    }
+
+    static void LogOnRoomDataUpdated(Guid groupId, Guid[] roomIds, Pose? floorPose, bool isLocal)
+    {
+        Assert.IsNotNull(Sampleton.PhotonRoomManager, "Sampleton.PhotonRoomManager");
+
+        if (!PhotonNetwork.InRoom ||
+            !PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue(k_PropKeySender, out var box) ||
+            box is not string updatedBy)
+        {
+            updatedBy = "(unknown)";
+        }
+
+        Sampleton.Log(
+            $"{nameof(OnRoomDataUpdated)}: {nameof(updatedBy)}: {updatedBy}\n" +
+            $"    {nameof(isLocal)}: {isLocal}\n" +
+            $"    {nameof(groupId)}: {groupId.Brief()}\n" +
+            $"    {nameof(roomIds)}.Length: {roomIds.Length}, {nameof(roomIds)}[0]: {roomIds[0].Brief()}\n" +
+            $"    {nameof(floorPose)}: {(floorPose is null ? "null" : floorPose.Value.position.ToString("F2"))}"
+        // (logging just the floorPose's position is enough to get an idea of it)
+        );
+    }
+
+    static void LogOnCustomDataUpdated(object boxedData, bool isLocal)
+    {
+        Assert.IsNotNull(Sampleton.PhotonRoomManager, "Sampleton.PhotonRoomManager");
+
+        if (!PhotonNetwork.InRoom ||
+            !PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue(k_PropKeySender, out var box) ||
+            box is not string updatedBy)
+        {
+            updatedBy = "(unknown)";
+        }
+
+        Sampleton.Log(
+            $"{nameof(OnCustomDataUpdated)}: {nameof(updatedBy)}: {updatedBy}\n" +
+            $"    {nameof(isLocal)}: {isLocal}\n" +
+            $"    {nameof(boxedData)}: <{boxedData.SafeTypeName()}>"
+        );
+    }
+
+
+    static bool TryGetRoomData(out Guid groupId, out Guid[] roomIds, out Pose? floorPose, out bool isLocal, Hashtable props = null)
+    {
+        groupId = Guid.Empty;
+        roomIds = Array.Empty<Guid>();
+        floorPose = null;
+        isLocal = false;
+
+        if (props is null)
+        {
+            var room = PhotonNetwork.CurrentRoom;
+            if (room is null)
+                return false;
+            props = room.CustomProperties;
+        }
+
+        if (!props.TryGetValue(k_PropKeyGroupId, out var box) || box is not Guid groupUuid || groupUuid == Guid.Empty)
+            return false;
+        groupId = groupUuid;
+
+        if (!props.TryGetValue(k_PropKeyRoomIds, out box) || box is not Guid[] roomArray || roomArray.Length == 0)
+            return false;
+        roomIds = roomArray;
+
+        if (props.TryGetValue(k_PropKeyHostPose, out box) && box is Pose pose)
+            floorPose = pose;
+
+        if (props.TryGetValue(k_PropKeyVersion, out box) && box is int version)
+            isLocal = version == s_LastVersion;
+
+        return true;
+    }
+
+    static bool TryGetCustomData(out object boxedData, out bool isLocal, Hashtable props = null)
+    {
+        isLocal = false;
+
+        if (props is null)
+        {
+            var room = PhotonNetwork.CurrentRoom;
+            if (room is null)
+            {
+                boxedData = null;
+                return false;
+            }
+            props = room.CustomProperties;
+        }
+
+        if (!props.TryGetValue(k_PropKeyCustomData, out boxedData) || boxedData is null)
+            return false;
+
+        if (props.TryGetValue(k_PropKeyVersion, out var box) && box is int version)
+            isLocal = version == s_LastVersion;
+
+        return true;
+    }
+
+
+    //
+    // MonoBehaviourPunCallbacks impl.
 
     #region [Monobehaviour Methods]
 
@@ -56,6 +318,10 @@ public class PhotonRoomManager : MonoBehaviourPunCallbacks
     public override void OnDisable()
     {
         base.OnDisable();
+
+        s_OnRoomDataUpdated = LogOnRoomDataUpdated;
+        s_OnCustomDataUpdated = LogOnCustomDataUpdated;
+
         OnApplicationQuit();
     }
 
@@ -72,6 +338,10 @@ public class PhotonRoomManager : MonoBehaviourPunCallbacks
         while (Application.internetReachability == NetworkReachability.NotReachable)
             yield return null;
 
+        // get the "low-level" peer state since it's what's checked before we try [re]connecting to Photon:
+        var peerState = PhotonNetwork.NetworkingClient.LoadBalancingPeer.PeerState;
+        Sampleton.Log($">> PhotonNetwork is {peerState}... (frame={Time.frameCount})");
+
         var ui = Sampleton.BaseUI;
 
         if (PhotonNetwork.InRoom)
@@ -87,13 +357,16 @@ public class PhotonRoomManager : MonoBehaviourPunCallbacks
         if (PhotonNetwork.InLobby)
             yield break;
 
+        if (peerState == PeerStateValue.Connecting)
+            yield break;
+
         if (PhotonNetwork.ReconnectAndRejoin())
         {
             Sampleton.Log($">> PhotonNetwork.ReconnectAndRejoin()");
             yield break;
         }
 
-        if (PhotonNetwork.IsConnected && PhotonNetwork.JoinLobby())
+        if (TryJoinLobby())
         {
             Sampleton.Log($">> PhotonNetwork.JoinLobby()");
             yield break;
@@ -105,7 +378,15 @@ public class PhotonRoomManager : MonoBehaviourPunCallbacks
             yield break;
         }
 
-        Sampleton.Error($">> ERR: PhotonNetwork failed to (re)connect after app resumed.");
+        yield return null;
+
+        switch (PhotonNetwork.NetworkingClient.LoadBalancingPeer.PeerState)
+        {
+            case PeerStateValue.Disconnected:
+            case PeerStateValue.Disconnecting:
+                Sampleton.Error($">> ERR: PhotonNetwork failed to (re)connect after app resumed.");
+                break;
+        }
     }
 
     void OnApplicationQuit()
@@ -129,12 +410,12 @@ public class PhotonRoomManager : MonoBehaviourPunCallbacks
     {
         Sampleton.Log($"Photon::OnConnectedToMaster, CloudRegion='{PhotonNetwork.CloudRegion}'");
 
-        PhotonNetwork.JoinLobby();
+        TryJoinLobby();
     }
 
     public override void OnJoinedLobby()
     {
-        Sampleton.Log($"Photon::OnJoinedLobby");
+        Sampleton.Log($"Photon::OnJoinedLobby: {PhotonNetwork.CurrentLobby}");
 
         if (Sampleton.BaseUI is LocalSpaceSharingUI ui)
         {
@@ -193,30 +474,27 @@ public class PhotonRoomManager : MonoBehaviourPunCallbacks
 
     public override void OnJoinRoomFailed(short returnCode, string message)
     {
-        if (returnCode == ErrorCode.GameDoesNotExist && !string.IsNullOrEmpty(m_LastRoomName))
+        string room = s_LastRoomName;
+        s_LastRoomName = null;
+
+        if (!CheckConnection(warn: true))
+            return;
+
+        if (returnCode == ErrorCode.GameDoesNotExist && !string.IsNullOrEmpty(room) && TryJoinRoom(room))
         {
-            string room = m_LastRoomName;
-            m_LastRoomName = null;
-            if (PhotonNetwork.JoinOrCreateRoom(room, RoomOptions, TypedLobby.Default))
-            {
-                Sampleton.Warn(
-                    $"Photon::OnJoinRoomFailed: \"{message}\" ({returnCode})\n" +
-                    $"+ Creating a new \"{room}\"..."
-                );
-                return;
-            }
+            Sampleton.Warn(
+                $"Photon::OnJoinRoomFailed: \"{message}\" ({returnCode})\n" +
+                $"+ Creating a new \"{room}\"..."
+            );
+            return;
         }
 
         Sampleton.Error($"Photon::OnJoinRoomFailed: \"{message}\" ({returnCode})");
 
-        if (PhotonNetwork.InLobby)
-        {
-            if (Sampleton.GetActiveUI(out var ui))
-                ui.DisplayLobbyPanel();
-            return;
-        }
-
-        _ = PhotonNetwork.JoinLobby();
+        if (!PhotonNetwork.InLobby)
+            TryJoinLobby();
+        else if (Sampleton.GetActiveUI(out var ui))
+            ui.DisplayLobbyPanel();
     }
 
     public override void OnJoinedRoom()
@@ -225,12 +503,10 @@ public class PhotonRoomManager : MonoBehaviourPunCallbacks
 
         Sampleton.Log($"Photon::OnJoinedRoom: {room.Name}");
 
-        m_LastRoomName = room.Name;
+        s_LastRoomName = room.Name;
+        s_LastVersion = -1; // rejoining should trigger On*DataUpdated even if the data was originally local
 
-        if (room.CustomProperties.TryGetValue(k_PubRoomsKey, out var box) && box is byte[] bytes)
-        {
-            ReceiveSharedData(bytes);
-        }
+        OnRoomPropertiesUpdate(room.CustomProperties);
 
         if (Sampleton.GetActiveUI(out var ui))
             ui.DisplayRoomPanel();
@@ -239,6 +515,9 @@ public class PhotonRoomManager : MonoBehaviourPunCallbacks
     public override void OnLeftRoom()
     {
         Sampleton.Log("Photon::OnLeftRoom"); // mainly for log consistency
+
+        s_LastRoomName = null;
+        s_LastVersion = -1;
 
         if (Sampleton.GetActiveUI(out var ui))
             ui.DisplayLobbyPanel();
@@ -274,242 +553,23 @@ public class PhotonRoomManager : MonoBehaviourPunCallbacks
 
     public override void OnRoomPropertiesUpdate(Hashtable changedProps)
     {
-        Sampleton.Log($"Photon::OnRoomPropertiesUpdate(n={changedProps.Count})");
-        foreach (var entry in changedProps)
+        Assert.IsNotNull(s_OnRoomDataUpdated, "s_OnRoomDataUpdated should never be null");
+        Assert.IsNotNull(s_OnCustomDataUpdated, "s_OnCustomDataUpdated should never be null");
+
+        if (changedProps != PhotonNetwork.CurrentRoom.CustomProperties) // intentional reference comparison
+            Sampleton.Log($"Photon::OnRoomPropertiesUpdate({string.Join(",", changedProps.Keys)})");
+
+        if (TryGetRoomData(out var group, out var rooms, out var floorPose, out bool isLocal, props: changedProps))
         {
-            Sampleton.Log($"+ {entry.Key}: {entry.Value}");
+            s_OnRoomDataUpdated(group, rooms, floorPose, isLocal);
         }
 
-        if (!changedProps.TryGetValue(k_PubRoomsKey, out var box))
-            return;
-
-        var bytes = box as byte[];
-
-        Assert.IsNotNull(bytes, $"changedProps[{k_PubRoomsKey}] is byte[]");
-
-        var currProps = PhotonNetwork.CurrentRoom.CustomProperties;
-
-        if (!(changedProps.TryGetValue(k_LastPubberKey, out box) || currProps.TryGetValue(k_LastPubberKey, out box))
-            || box is not int pubberNubber)
+        if (TryGetCustomData(out var boxedData, out isLocal, props: changedProps))
         {
-            Sampleton.Error($"ERR: Non-empty room properties should have a value for [\"{k_LastPubberKey}\"]!");
-            return;
+            s_OnCustomDataUpdated(boxedData, isLocal);
         }
-
-        if (pubberNubber == PhotonNetwork.LocalPlayer.ActorNumber)
-        {
-            Sampleton.Log($"* this data is yours.");
-            return;
-        }
-
-        var pubber = PhotonNetwork.CurrentRoom.GetPlayer(pubberNubber);
-        Sampleton.Log($"NEW shared data from Player {pubber}:");
-
-        ReceiveSharedData(bytes);
     }
 
     #endregion [Photon Callbacks]
-
-
-    #region [Send and read room data]
-
-    public void PublishRoomData(Guid groupUuid, ICollection<Guid> roomUuids, Pose? floorPose = null)
-    {
-        Sampleton.Log($"{nameof(PublishRoomData)}: {roomUuids.Count} rooms");
-
-        const int kNumGroupIds = 1;
-
-        int size = k_PacketHeaderSz + k_UuidSize * (kNumGroupIds + roomUuids.Count);
-        if (floorPose.HasValue)
-            size += k_Pose3DSize;
-
-        Array.Resize(ref m_PacketBuf, size);
-
-        var rawBytes = m_PacketBuf;
-        rawBytes[0] = floorPose.HasValue ? k_PacketFormatWithPose
-                                         : k_PacketFormat;
-        int offset = k_PacketHeaderSz;
-
-        // Group UUID
-        PackUuid(groupUuid, rawBytes, ref offset);
-
-        // Room UUIDs
-        foreach (var uuid in roomUuids)
-        {
-            PackUuid(uuid, rawBytes, ref offset);
-        }
-
-        // Floor Pose
-        if (floorPose.HasValue)
-            PackPose(floorPose.Value, rawBytes, ref offset);
-
-        Assert.AreEqual(rawBytes.Length, offset, $"{nameof(rawBytes)}.Length");
-
-        var pubProps = new Hashtable
-        {
-            [k_PubRoomsKey] = rawBytes,
-            [k_LastPubberKey] = PhotonNetwork.LocalPlayer.ActorNumber,
-        };
-
-        var room = PhotonNetwork.CurrentRoom;
-        Assert.IsNotNull(room, "PhotonNetwork.CurrentRoom");
-
-        var pubBouncer = default(Hashtable);
-        if (room.CustomProperties.TryGetValue(k_LastPubberKey, out var pubber))
-        {
-            pubBouncer = new Hashtable
-            {
-                [k_LastPubberKey] = pubber,
-            };
-        }
-
-        // prefer room properties so that the data can be queried anytime after sync
-        room.SetCustomProperties(pubProps, expectedProperties: pubBouncer);
-    }
-
-    static void PackUuid(Guid uuid, byte[] packet, ref int offset)
-    {
-        var toSpan = new Span<byte>(packet, offset, k_UuidSize);
-        bool ok = uuid.TryWriteBytes(toSpan);
-        Assert.IsTrue(ok, "uuid.TryWriteBytes(toSpan)");
-        offset += k_UuidSize;
-    }
-
-    static void PackPose(Pose pose, byte[] packet, ref int offset)
-    {
-        var toSpan = new Span<byte>(packet, offset, k_Pose3DSize);
-
-        bool ok = MemoryMarshal.TryWrite(toSpan, ref pose);
-        Assert.IsTrue(ok, "MemoryMarshal.TryWrite(toSpan, ref pose)");
-
-        offset += toSpan.Length;
-    }
-
-    static bool UnpackPose(byte[] packet, ref int offset, out Pose pose)
-    {
-        pose = default;
-        if (offset + k_Pose3DSize > packet.Length)
-            return false;
-
-        var fromSpan = new ReadOnlySpan<byte>(packet, offset, k_Pose3DSize);
-
-        bool ok = MemoryMarshal.TryRead(fromSpan, out pose);
-        Assert.IsTrue(ok, "MemoryMarshal.TryRead(fromSpan, out pose)");
-
-        offset += k_Pose3DSize;
-        return Quaternion.Dot(pose.rotation, pose.rotation) > 1f - Vector4.kEpsilon;
-    }
-
-    void ReceiveSharedData(byte[] rawPacket)
-    {
-        Sampleton.Log($"{nameof(ReceiveSharedData)}({nameof(rawPacket)}[{(rawPacket is null ? "null" : rawPacket.Length)}])");
-
-        if (rawPacket is null)
-        {
-            Sampleton.Error($"  - ERR: {nameof(rawPacket)} was null!");
-            return;
-        }
-
-        if (rawPacket.Length == 0)
-        {
-            Sampleton.Error($"  - ERR: {nameof(rawPacket)} was empty!");
-            return;
-        }
-
-        int tailSize;
-        switch (rawPacket[0])
-        {
-            case k_PacketFormat:
-                tailSize = 0;
-                break;
-            case k_PacketFormatWithPose:
-                tailSize = k_Pose3DSize;
-                break;
-            default:
-                Sampleton.Error($"  - ERR: invalid packet format: {rawPacket[0]}");
-                return;
-        }
-
-        Sampleton.Log($"  + packet format: {rawPacket[0]}");
-
-        if ((rawPacket.Length - tailSize) % k_UuidSize != k_PacketHeaderSz)
-        {
-            Sampleton.Error($"  - ERR: invalid packet size: {rawPacket.Length}");
-            return;
-        }
-
-        int nUuids = (rawPacket.Length - k_PacketHeaderSz - tailSize) / k_UuidSize;
-        if (nUuids == 0)
-        {
-            Sampleton.Warn($"  - SKIP: uuid block is empty.");
-            return;
-        }
-
-        Sampleton.Log($"  + valid packet received!");
-
-        var roomUuids = new Guid[nUuids - 1];
-        var groupUuid = Guid.Empty;
-        var curRoomId = default(Guid?);
-        int offset = k_PacketHeaderSz;
-
-        for (var i = 0; i < nUuids; i++)
-        {
-            // using a ReadOnlySpan is efficient because the packet array never needs to be copied into buffers
-            var uuid = new Guid(new ReadOnlySpan<byte>(rawPacket, start: offset, length: k_UuidSize));
-            offset += k_UuidSize;
-
-            Debug.LogFormat( // not logging w/ Sampleton because that would be too verbose
-                LogType.Log,
-                LogOption.NoStacktrace,
-                context: this,
-                $"{nameof(ReceiveSharedData)}: unpacked {(i == 0 ? "Group" : "Room")}: {uuid}"
-            );
-
-            Assert.AreNotEqual(Guid.Empty, uuid, "uuid != null");
-
-            // First GUID is the group
-            if (i == 0)
-            {
-                groupUuid = uuid;
-                continue;
-            }
-
-            // et cetera = rooms
-            roomUuids[i - 1] = uuid;
-            curRoomId ??= uuid;
-        }
-
-        Sampleton.Log($"{nameof(ReceiveSharedData)} DONE. 1 group, {roomUuids.Length} room(s) received.\n+ group: {groupUuid}");
-        if (curRoomId.HasValue)
-            Sampleton.Log($"+ current room: {curRoomId.Value}");
-
-        // Floor pose
-        if (curRoomId.HasValue && rawPacket[0] == k_PacketFormatWithPose && UnpackPose(rawPacket, ref offset, out var floorPose))
-        {
-            MRSceneManager.SetHostAlignment((curRoomId.Value, floorPose));
-            Sampleton.Log($"+ SetHostAlignment(room: {curRoomId.Value.Brief()}, floorPose: {floorPose.ToString("F2")})");
-        }
-        else
-        {
-            MRSceneManager.SetHostAlignment(null);
-            Sampleton.Warn($"- SetHostAlignment(null) - no current room or host floor pose");
-        }
-
-        MRSceneManager.SetSharedSceneUuids(roomUuids, groupUuid);
-
-        if (Sampleton.PlayerFace.IsInLoadedRoom())
-        {
-            Sampleton.Log(
-                $"-> Because your face is already in a room, the shared scene won't auto-load." +
-                " You can attempt to load it manually using the \"Load Shared\" button."
-            );
-        }
-        else
-        {
-            MRSceneManager.LoadSharedScene();
-        }
-    }
-
-    #endregion [Send and read room data]
 
 }

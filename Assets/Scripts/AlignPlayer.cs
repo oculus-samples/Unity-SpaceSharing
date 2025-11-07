@@ -6,6 +6,7 @@ using UnityEngine;
 using UnityEngine.Events;
 
 
+[System.Obsolete("As of v81, MRUK no longer allows clients to manually align MRUKAnchors.")]
 public class AlignPlayer : MonoBehaviour
 {
     [SerializeField]

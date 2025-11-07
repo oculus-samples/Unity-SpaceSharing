@@ -30,13 +30,29 @@ public class Sampleton : MonoBehaviour
     public static ConnectMethod ConnectMethod
         => s_Instance ? s_Instance.m_Connexion : ConnectMethod.None;
 
-    [CanBeNull]
+    public static Scene CurrentScene
+        => s_Instance ? s_Instance.gameObject.scene : SceneManager.GetActiveScene();
+
+    [NotNull]
     public static Transform PlayerFace
-        => s_Instance ? s_Instance.m_PlayerFace : null;
+    {
+        get
+        {
+            Assert.IsNotNull(s_Instance, "No Sampleton in the scene!");
+            Assert.IsNotNull(Camera.main, "No Camera in the scene!");
+            if (!s_Instance.m_PlayerFace)
+            {
+                // this is a runtime fallback; m_PlayerFace should keep a serialized ref
+                s_Instance.m_PlayerFace = Camera.main.transform;
+            }
+            return s_Instance.m_PlayerFace;
+        }
+    }
 
     [CanBeNull]
     public static BaseUI BaseUI
         => s_Instance ? s_Instance.m_MenuUI : null;
+
     [CanBeNull]
     public static PhotonRoomManager PhotonRoomManager
         => s_Instance ? s_Instance.m_PhotonMan : null;
@@ -91,15 +107,6 @@ public class Sampleton : MonoBehaviour
             Log($"Set NickName: \"{nickname}\"");
         else if (prev != nickname)
             Log($"Overriding Nickname: \"{prev}\" -> \"{nickname}\"");
-    }
-
-    public static bool GetPlatformID(out ulong uid)
-    {
-        uid = 0;
-        if (s_OculusUser is null || s_OculusUser.ID == 0)
-            return PhotonNetwork.LocalPlayer.TryGetPlatformID(out uid);
-        uid = s_OculusUser.ID;
-        return true;
     }
 
     public static Coroutine DelayCall(float seconds, System.Action action)
@@ -186,9 +193,7 @@ public class Sampleton : MonoBehaviour
         catch (UnityException e)
         {
             Warn($"Oculus.Platform.Core.Initialize FAILED: {e.Message}");
-            // "UnityException: Update your app id by selecting 'Oculus Platform' -> 'Edit Settings'"
-            //  (   Although note, this error message is outdated.
-            //      The modern menu path is 'Meta' > 'Platform' > 'Edit Settings'.  )
+            // "UnityException: Update your app id by selecting 'Meta' > 'Platform > 'Edit Settings'"
         }
 
         if (Oculus.Platform.Core.IsInitialized())
@@ -255,10 +260,11 @@ public class Sampleton : MonoBehaviour
             Log(flume);
 
             SetNickname(username);
-            PhotonNetwork.LocalPlayer.SetPlatformID(ocUserId);
 
             if (ocUserId > 0)
                 return;
+
+            // ocUserId isn't used for much else in this sample.
 
             Warn(
                 $"NOTICE: Your user/device is not authenticated to use this app.\n" +
@@ -330,20 +336,15 @@ public class Sampleton : MonoBehaviour
         if (!gameObject.scene.isLoaded) // anti-prefab guard
             return;
 
-        if (!m_PhotonMan)
+        foreach (var rootObj in gameObject.scene.GetRootGameObjects())
         {
-            foreach (var rootObj in gameObject.scene.GetRootGameObjects())
-            {
-                m_PhotonMan = rootObj.GetComponent<PhotonRoomManager>();
-                if (m_PhotonMan)
-                    break;
-            }
-        }
+            if (m_PhotonMan && m_PlayerFace)
+                break;
 
-        if (!m_PlayerFace)
-        {
-            var rig = FindObjectOfType<OVRCameraRig>();
-            if (rig)
+            if (!m_PhotonMan && rootObj.TryGetComponent(out PhotonRoomManager photonMan))
+                m_PhotonMan = photonMan;
+
+            if (!m_PlayerFace && rootObj.TryGetComponent(out OVRCameraRig rig))
                 m_PlayerFace = rig.centerEyeAnchor;
         }
     }
@@ -392,7 +393,7 @@ public class Sampleton : MonoBehaviour
                 }
                 if (!m_PhotonMan)
                 {
-                    _ = new GameObject(nameof(PhotonRoomManager)).AddComponent<PhotonRoomManager>();
+                    m_PhotonMan = new GameObject(nameof(PhotonRoomManager)).AddComponent<PhotonRoomManager>();
                 }
                 break;
 

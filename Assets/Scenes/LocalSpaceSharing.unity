@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 705507994}
-  m_IndirectSpecularColor: {r: 0, g: 0, b: 0, a: 1}
+  m_IndirectSpecularColor: {r: 0.18028378, g: 0.22571412, b: 0.30692285, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -141,7 +141,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &16278332
 RectTransform:
   m_ObjectHideFlags: 0
@@ -157,10 +157,10 @@ RectTransform:
   - {fileID: 612683356}
   m_Father: {fileID: 346559866}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 0, y: 0}
-  m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 0, y: 0}
+  m_AnchorMin: {x: 0, y: 1}
+  m_AnchorMax: {x: 0, y: 1}
+  m_AnchoredPosition: {x: 115.507324, y: -306.43823}
+  m_SizeDelta: {x: 232.01001, y: 45}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &16278333
 MonoBehaviour:
@@ -1481,10 +1481,10 @@ RectTransform:
   m_Children: []
   m_Father: {fileID: 612683356}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 0, y: 0}
-  m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 0, y: 0}
+  m_AnchorMin: {x: 0, y: 1}
+  m_AnchorMax: {x: 0, y: 1}
+  m_AnchoredPosition: {x: 139.81264, y: -22.5}
+  m_SizeDelta: {x: 152.38478, y: 29}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &498869155
 MonoBehaviour:
@@ -3238,10 +3238,10 @@ RectTransform:
   m_Children: []
   m_Father: {fileID: 612683356}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 0, y: 0}
-  m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 0, y: 0}
+  m_AnchorMin: {x: 0, y: 1}
+  m_AnchorMax: {x: 0, y: 1}
+  m_AnchoredPosition: {x: 39.81012, y: -22.5}
+  m_SizeDelta: {x: 47.620243, y: 29}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1296488394
 MonoBehaviour:
@@ -7035,7 +7035,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1865941526453430781, guid: cd8280e8c381fbd4bbcad4b7ee581c31, type: 3}
       propertyPath: m_Name
-      value: AlignPlayer
+      value: AlignPlayer (OBSOLETE)
+      objectReference: {fileID: 0}
+    - target: {fileID: 1865941526453430781, guid: cd8280e8c381fbd4bbcad4b7ee581c31, type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1865941526453430782, guid: cd8280e8c381fbd4bbcad4b7ee581c31, type: 3}
       propertyPath: sceneViewId
@@ -8582,6 +8586,18 @@ MonoBehaviour:
   _whenUnselectedEmpty:
     m_PersistentCalls:
       m_Calls: []
+  _whenBeginHighlightWithObject:
+    m_PersistentCalls:
+      m_Calls: []
+  _whenEndHighlightWithObject:
+    m_PersistentCalls:
+      m_Calls: []
+  _whenSelectedHoveredWithObject:
+    m_PersistentCalls:
+      m_Calls: []
+  _whenUnselectedHoveredWithObject:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!1 &7452495321472296251
 GameObject:
   m_ObjectHideFlags: 0
@@ -9201,7 +9217,9 @@ MonoBehaviour:
           m_StringArgument: Return to Lobby
           m_BoolArgument: 0
         m_CallState: 2
+  m_AutoLoadRoomsWhenPossible: 1
   m_VerboseUserList: 0
+  m_UIUpdateInterval: 1
   m_CreateRoomBtn: {fileID: 2223578376304249728}
   m_FindRoomsBtn: {fileID: 2223578377596045931}
   m_RoomListPanel: {fileID: 7452495322664213316}

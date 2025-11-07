@@ -2594,10 +2594,6 @@ PrefabInstance:
       value: 3
       objectReference: {fileID: 0}
     - target: {fileID: 5414912244164414807, guid: 60fa00281e83b294583adc31df520fbe, type: 3}
-      propertyPath: _enableDynamicResolution
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 5414912244164414807, guid: 60fa00281e83b294583adc31df520fbe, type: 3}
       propertyPath: dynamicResolutionVersion
       value: 1
       objectReference: {fileID: 0}

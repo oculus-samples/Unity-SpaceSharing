@@ -2,17 +2,12 @@
 
 using JetBrains.Annotations;
 
-using Photon.Realtime;
-
 using Meta.XR.MRUtilityKit;
 
 using System;
-using System.Runtime.InteropServices;
 using System.Text;
 
 using UnityEngine;
-
-using Hashtable = ExitGames.Client.Photon.Hashtable;
 
 
 static class SampleExtensions
@@ -40,66 +35,30 @@ static class SampleExtensions
     }
 
 
-    public static bool TryGetPlatformID([CanBeNull] this Player photonPlayer, out ulong uid)
+    public static string SafeTypeName(this object box)
     {
-        uid = 0;
-        if (photonPlayer is null ||
-            !photonPlayer.CustomProperties.TryGetValue(k_PlatIDKey, out var box) ||
-            box is not long rawUid)
+        if (box is null)
+            return "null";
+
+        if (box is not Type type)
+            return SafeTypeName(box.GetType());
+
+        if (type.IsArray)
+            return $"{SafeTypeName(type.GetElementType())}[]";
+
+        // note: the following sugar is not exhaustive,
+        //       as this utility is only used on a known subset of input types anyway.
+        return Type.GetTypeCode(type) switch
         {
-            return false;
-        }
-
-        uid = new Reinterpret64 { Signed = rawUid }.Unsigned;
-
-        return uid > 0;
-    }
-
-    public static void SetPlatformID([CanBeNull] this Player photonPlayer, ulong uid)
-    {
-        var props = new Hashtable
-        {
-            [k_PlatIDKey] = uid == 0 ? null : new Reinterpret64 { Unsigned = uid }.Signed
+            TypeCode.String => "string",
+            TypeCode.Single => "float",
+            TypeCode.Int32 => "int",
+            TypeCode.Int64 => "long",
+            TypeCode.UInt64 => "ulong",
+            TypeCode.Byte => "byte",
+            _ => type.Name
         };
-
-        if (photonPlayer.SetCustomProperties(props) || uid == 0)
-            return;
-
-        Sampleton.Error($"Photon ERR: failed to set {photonPlayer.NickName}.CustomProperties[{nameof(k_PlatIDKey)}] = {uid}");
     }
-
-
-    [NotNull]
-    public static byte[] SerializeToByteArray<T>([CanBeNull] T obj) where T : new()
-    {
-        if (obj is null)
-            return Array.Empty<byte>();
-
-        // NOTE: Using JSON as an intermediate protocol is fairly inefficient at runtime compared to a more direct
-        // protocol, but it is safe, and the code is brief for the sake of this example.
-
-        var json = JsonUtility.ToJson(obj, prettyPrint: false) ?? "{}";
-
-        return EncodingForSerialization.GetBytes(json);
-    }
-
-    public static T DeserializeFromByteArray<T>([NotNull] byte[] bytes) where T : new()
-    {
-        // NOTE: Using JSON as an intermediate protocol is fairly inefficient at runtime compared to a more direct
-        // protocol, but it is safe, and the code is brief for the sake of this example.
-
-        var json = EncodingForSerialization.GetString(bytes);
-
-        return JsonUtility.FromJson<T>(json);
-    }
-
-
-    public static string Serialize(in this Guid guid, string prefix = "")
-        => $"{prefix}{guid:N}";
-
-
-    public static int GetSerializedByteCount(this string str, int lengthHeaderSz = sizeof(ushort))
-        => lengthHeaderSz + (string.IsNullOrEmpty(str) ? 0 : EncodingForSerialization.GetByteCount(str));
 
 
     public static string Brief(in this Guid guid)
@@ -148,7 +107,7 @@ static class SampleExtensions
                 if (Debug.isDebugBuild)
                 {
 #endif
-                    Debug.Log($"Application.OpenURL(\"{kEnhancedSpatialServicesInfoURL}\")");
+                    Sampleton.Log($"  -> Application.OpenURL(\"{kEnhancedSpatialServicesInfoURL}\")");
                     Application.OpenURL(kEnhancedSpatialServicesInfoURL);
                 }
                 return "\nEnhanced Spatial Services is disabled on your device. Enable it in OS Settings > Privacy & Safety > Device Permissions";
@@ -166,21 +125,6 @@ static class SampleExtensions
         }
 
         return string.Empty;
-    }
-
-
-    //
-    // impl. details
-
-    const string k_PlatIDKey = "ocid";
-
-    [StructLayout(LayoutKind.Explicit)]
-    struct Reinterpret64
-    {
-        [FieldOffset(0)]
-        public ulong Unsigned;
-        [FieldOffset(0)]
-        public long Signed;
     }
 
 } // end static class SampleExtensions

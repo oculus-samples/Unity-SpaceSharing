@@ -8,17 +8,25 @@ using System.Collections.Generic;
 using System.Text;
 
 using UnityEngine;
-using UnityEngine.Serialization;
+using UnityEngine.Assertions;
 using UnityEngine.UI;
 
 using TMPro;
 
+using Guid = System.Guid;
+
 
 public class LocalSpaceSharingUI : BaseUI
 {
+    //
+    // Serialized fields
+
     [Header(nameof(LocalSpaceSharingUI))]
+
     [SerializeField]
-    [Tooltip(
+    bool m_AutoLoadRoomsWhenPossible = true;
+
+    [SerializeField, Tooltip(
         "If disabled, \"(inactive)\" Photon Players will not " +
         "appear in the current Room's \"Users:\" list.\n\n" +
         "If enabled, the per-Room \"(inactive)\" status and CustomProperties " +
@@ -27,59 +35,55 @@ public class LocalSpaceSharingUI : BaseUI
         "their slot remains reserved for up to a minute in case they return.")]
     bool m_VerboseUserList;
 
-    [FormerlySerializedAs("createRoomButton")]
+    [SerializeField, Range(0f, 8f)]
+    float m_UIUpdateInterval = 1f;
+
     [SerializeField]
     Button m_CreateRoomBtn;
 
-    [FormerlySerializedAs("joinRoomButton")]
     [SerializeField]
     Button m_FindRoomsBtn;
 
-    [FormerlySerializedAs("roomLayoutPanel")]
     [SerializeField]
     GameObject m_RoomListPanel;
 
-    [FormerlySerializedAs("roomLayoutPanelRowPrefab")]
     [SerializeField]
     GameObject m_RoomListItemTemplate;
 
-    [FormerlySerializedAs("statusText")]
     [SerializeField]
     TMP_Text m_StatusText;
 
-    [FormerlySerializedAs("roomText")]
     [SerializeField]
     TMP_Text m_RoomText;
 
-    [FormerlySerializedAs("userText")]
     [SerializeField]
     TMP_Text m_UserText;
 
+    // runtime fields
+
+    static readonly StringBuilder s_TextBuf = new();
+
+
+    //
+    // UI UnityEvent listeners
+
+    // in lobby:
 
     public void OnCreateRoomBtn()
     {
-        if (Sampleton.ConnectMethod != ConnectMethod.Photon)
-        {
-            Sampleton.Error($"{nameof(OnCreateRoomBtn)}: Not supported in this scene!");
-            NotifyLobbyAvailable(false);
-            return;
-        }
-
-        if (!PhotonNetwork.IsConnected)
-        {
-            Sampleton.Warn($"{nameof(OnCreateRoomBtn)}: No Photon connection!\n- Attempting to reconnect... (retry this button later)");
-            PhotonNetwork.ConnectUsingSettings();
-            return;
-        }
+        Assert.AreEqual(ConnectMethod.Photon, Sampleton.ConnectMethod, "Sampleton.ConnectMethod should be Photon");
 
         Sampleton.Log($"{nameof(OnCreateRoomBtn)}:");
+
+        if (!PhotonRoomManager.CheckConnection(warn: true))
+            return;
 
         string username = Sampleton.GetNickname();
         string newRoomName = $"{username}'s room";
 
-        Sampleton.Log($"+ Attempting to host a new room named \"{newRoomName}\"...");
+        Sampleton.Log($"+ Joining or creating \"{newRoomName}\" ...");
 
-        if (PhotonNetwork.JoinOrCreateRoom(newRoomName, PhotonRoomManager.RoomOptions, TypedLobby.Default))
+        if (PhotonRoomManager.TryJoinRoom(newRoomName))
             return;
 
         Sampleton.Error($"ERR: Room creation request not sent to server!");
@@ -87,48 +91,29 @@ public class LocalSpaceSharingUI : BaseUI
 
     public void OnFindRoomsBtn()
     {
-        if (Sampleton.ConnectMethod != ConnectMethod.Photon)
-        {
-            Sampleton.Error($"{nameof(OnFindRoomsBtn)}: Not supported in this scene!");
-            NotifyLobbyAvailable(false);
-            return;
-        }
+        Assert.AreEqual(ConnectMethod.Photon, Sampleton.ConnectMethod, "Sampleton.ConnectMethod should be Photon");
 
         Sampleton.Log(nameof(OnFindRoomsBtn));
 
-        if (!PhotonNetwork.IsConnected)
-        {
-            if (PhotonNetwork.ConnectUsingSettings())
-                Sampleton.Warn("PhotonNetwork was disconnected. Wait a few moments before trying this again...");
-            else
-                Sampleton.Error("Cannot connect to PhotonNetwork with the app's configured settings.");
+        if (!PhotonRoomManager.CheckConnection(warn: true))
             return;
-        }
 
         m_RoomListPanel.SetActive(true);
     }
 
     public void OnJoinRoomBtn(TMP_Text roomName)
     {
-        if (!roomName)
-        {
-            Sampleton.Error($"{nameof(OnJoinRoomBtn)}: Missing reference to room name component!");
-            return;
-        }
-
-        if (string.IsNullOrEmpty(roomName.text))
-        {
-            Sampleton.Error($"{nameof(OnJoinRoomBtn)}: given room name is empty!");
-            return;
-        }
+        Assert.AreEqual(ConnectMethod.Photon, Sampleton.ConnectMethod, "Sampleton.ConnectMethod should be Photon");
 
         Sampleton.Log($"{nameof(OnJoinRoomBtn)}: \"{roomName.text}\"");
 
-        _ = Sampleton.GetNickname();
+        if (PhotonRoomManager.TryJoinRoom(roomName.text))
+            return;
 
-        PhotonNetwork.JoinRoom(roomName.text);
+        Sampleton.Error($"ERR: Photon failed to join \"{roomName.text}\".");
     }
 
+    // in room:
 
     public void OnLoadLocalSceneButtonPressed()
     {
@@ -148,6 +133,9 @@ public class LocalSpaceSharingUI : BaseUI
         MRSceneManager.ShareLocalScene();
     }
 
+
+    //
+    // C# Public Interface
 
     public void NotifyLobbyAvailable(bool connected)
     {
@@ -187,27 +175,22 @@ public class LocalSpaceSharingUI : BaseUI
 
 
     //
-    // private impl.
+    // MonoBehaviour messages & overrides
 
-    static readonly StringBuilder s_TextBuf = new();
-
-    void UpdateLobbyInteractability()
-        => NotifyLobbyAvailable(PhotonNetwork.InLobby);
-
-    void OnEnable()
+    protected virtual void OnEnable()
     {
         OnDisplayRoom += UpdateRoomName;
+        OnDisplayLobby += UpdateLobbyInteractability;
 
-        UpdateLobbyInteractability();
-        if (Sampleton.ConnectMethod == ConnectMethod.Photon)
-            OnDisplayLobby += UpdateLobbyInteractability;
+        PhotonRoomManager.OnRoomDataUpdated += OnPhotonRoomUpdated;
     }
 
-    void OnDisable()
+    protected virtual void OnDisable()
     {
         OnDisplayRoom -= UpdateRoomName;
-        if (Sampleton.ConnectMethod == ConnectMethod.Photon)
-            OnDisplayLobby -= UpdateLobbyInteractability;
+        OnDisplayLobby -= UpdateLobbyInteractability;
+
+        PhotonRoomManager.OnRoomDataUpdated -= OnPhotonRoomUpdated;
     }
 
     protected override IEnumerator Start()
@@ -221,12 +204,58 @@ public class LocalSpaceSharingUI : BaseUI
 
         m_RoomListPanel.SetActive(false);
 
-        yield return UpdateUI(new WaitForSecondsRealtime(1f));
+        switch (Sampleton.ConnectMethod)
+        {
+            case ConnectMethod.Photon:
+                _ = StartCoroutine(UpdatePhotonUI(new WaitForSecondsRealtime(m_UIUpdateInterval)));
+                break;
+        }
     }
 
-    IEnumerator UpdateUI(object interval)
+
+    //
+    // Photon-centric impl.
+
+    void OnPhotonRoomUpdated(Guid groupId, Guid[] roomIds, Pose? floorPose, bool isLocal)
     {
-        bool logNetworkWarning = true;
+        if (isLocal)
+        {
+            Sampleton.Log(
+                $"{nameof(OnPhotonRoomUpdated)}: NO-OP: No need to load your own room twice ({nameof(isLocal)})"
+            );
+            return;
+        }
+
+        bool tryAutoLoadRooms = m_AutoLoadRoomsWhenPossible;
+
+        Sampleton.Log(
+            $"{nameof(OnPhotonRoomUpdated)}({nameof(tryAutoLoadRooms)} = {tryAutoLoadRooms})"
+        );
+
+        MRSceneManager.SetSharedSceneUuids(roomIds, groupId);
+
+        MRSceneManager.SetHostAlignment(floorPose.HasValue ? (roomIds[0], floorPose.Value) : null);
+
+        if (!tryAutoLoadRooms)
+            return;
+
+        if (Sampleton.PlayerFace.IsInLoadedRoom())
+        {
+            Sampleton.Log(
+                "-> Because you are already in a loaded room, the shared scene won't auto-load." +
+                " You can attempt to load it manually using the \"Load Shared\" button."
+            );
+        }
+        else
+        {
+            MRSceneManager.LoadSharedScene();
+        }
+    }
+
+
+    IEnumerator UpdatePhotonUI(object interval)
+    {
+        bool expectReachable = true;
         while (this)
         {
             if (ShowingLobbyPanel)
@@ -237,7 +266,7 @@ public class LocalSpaceSharingUI : BaseUI
             if (ShowingRoomPanel)
             {
                 UpdateRoomName();
-                UpdateStatus(ref logNetworkWarning);
+                UpdateStatus(ref expectReachable);
                 UpdateUserList();
             }
 
@@ -245,35 +274,48 @@ public class LocalSpaceSharingUI : BaseUI
         }
     }
 
+    void UpdateLobbyInteractability()
+    {
+        switch (Sampleton.ConnectMethod)
+        {
+            case ConnectMethod.Photon:
+                NotifyLobbyAvailable(PhotonNetwork.InLobby);
+                break;
+            default:
+                NotifyLobbyAvailable(false);
+                break;
+        }
+    }
+
     void UpdateRoomName()
     {
         s_TextBuf.Clear();
         s_TextBuf.Append("Room: ");
-        s_TextBuf.Append(PhotonNetwork.InRoom ? PhotonNetwork.CurrentRoom.Name
-                                              : "(none)");
+        s_TextBuf.Append(PhotonRoomManager.CurrentRoomName);
         m_RoomText.SetText(s_TextBuf);
     }
 
-    void UpdateStatus(ref bool logNetworkWarning)
+    void UpdateStatus(ref bool expectReachable)
     {
         s_TextBuf.Clear();
         s_TextBuf.Append("Status: ");
         s_TextBuf.Append(PhotonNetwork.NetworkClientState);
+
         if (Application.internetReachability == NetworkReachability.NotReachable)
         {
             s_TextBuf.Append("\n<color=red>- NetworkReachability.NotReachable</color>");
-            if (logNetworkWarning)
+            if (expectReachable)
             {
                 Sampleton.Warn($"WARNING: Application.internetReachability == {Application.internetReachability}");
-                logNetworkWarning = false;
+                expectReachable = false;
             }
         }
         else
         {
-            if (!logNetworkWarning)
+            if (!expectReachable)
             {
                 Sampleton.Log($"Internet reachability restored! ({Application.internetReachability})");
-                logNetworkWarning = true;
+                expectReachable = true;
             }
         }
 
