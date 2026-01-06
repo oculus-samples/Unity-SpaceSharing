@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+using Meta.XR.Samples;
+
 using Photon.Pun;
 using Photon.Realtime;
 
@@ -18,6 +20,7 @@ using Hashtable = ExitGames.Client.Photon.Hashtable;
 /// Manages Photon Room creation and maintenance, including custom data synchronized (shared) to the Room.
 /// </summary>
 [RequireComponent(typeof(PhotonView))]
+[MetaCodeSample("SpaceSharing")]
 public class PhotonRoomManager : MonoBehaviourPunCallbacks
 {
     //
@@ -62,20 +65,34 @@ public class PhotonRoomManager : MonoBehaviourPunCallbacks
                                 : PhotonNetwork.InLobby ? $"{PhotonNetwork.CurrentLobby.Name} (lobby)"
                                                         : "(none)";
 
-    public static bool CheckConnection(bool warn)
+    public static bool CheckConnection(bool tryReconnect, bool logOnFail)
     {
         if (PhotonNetwork.IsConnected)
             return true;
-        if (PhotonNetwork.ConnectUsingSettings() && warn)
-            Sampleton.Warn("PhotonNetwork was disconnected. Wait a few moments before trying again.");
+
+        var peerState = PhotonNetwork.NetworkingClient.LoadBalancingPeer.PeerState;
+        bool reconnecting = peerState == PeerStateValue.Connecting ||
+                            (tryReconnect && (PhotonNetwork.Reconnect() ||
+                                              PhotonNetwork.ConnectUsingSettings()));
+        if (!logOnFail)
+            return false;
+
+        const string kPhotonNotConnected = "PhotonNetwork was disconnected";
+        const string kNextStepsMsg = "Check your wifi, restart the scene/app, or check logcat for causes";
+
+        if (reconnecting)
+            Sampleton.Warn($"{kPhotonNotConnected}. Reconnecting now...\n(Status update should log here in a few moments.)");
+        else if (tryReconnect)
+            Sampleton.Error($"{kPhotonNotConnected}. The attempt to reconnect FAILED.\n{kNextStepsMsg}.");
         else
-            Sampleton.Error("Cannot connect to PhotonNetwork with the app's configured settings.");
+            Sampleton.Error($"{kPhotonNotConnected}. {kNextStepsMsg}.");
+
         return false;
     }
 
     public static bool TryJoinLobby()
     {
-        if (!PhotonNetwork.IsConnected)
+        if (!CheckConnection(tryReconnect: false, logOnFail: false))
             return false;
 
         s_LastLobby = new TypedLobby(Sampleton.CurrentScene.name, LobbyType.Default);
@@ -477,7 +494,7 @@ public class PhotonRoomManager : MonoBehaviourPunCallbacks
         string room = s_LastRoomName;
         s_LastRoomName = null;
 
-        if (!CheckConnection(warn: true))
+        if (!CheckConnection(tryReconnect: false, logOnFail: true))
             return;
 
         if (returnCode == ErrorCode.GameDoesNotExist && !string.IsNullOrEmpty(room) && TryJoinRoom(room))

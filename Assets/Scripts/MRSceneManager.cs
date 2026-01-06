@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+using Meta.XR.Samples;
+
 using JetBrains.Annotations;
 
 using Meta.XR.MRUtilityKit;
@@ -20,6 +22,7 @@ using UnityEngine.Events;
 ///   Mixed Reality Scene Manager - handles loading, scanning, sharing, etc of MRUKRooms (often referred to as "scenes")
 ///   in the local mixed reality space.
 /// </summary>
+[MetaCodeSample("SpaceSharing")]
 public class MRSceneManager : MonoBehaviour
 {
     //
@@ -244,7 +247,7 @@ public class MRSceneManager : MonoBehaviour
                     return false;
                 }
 
-                if (!PhotonNetwork.IsConnected)
+                if (!PhotonRoomManager.CheckConnection(tryReconnect: false, logOnFail: false))
                 {
                     if (printReason)
                         Sampleton.Error("- Can't share - not connected to the Photon network");
@@ -264,9 +267,6 @@ public class MRSceneManager : MonoBehaviour
                         Sampleton.Error("- Can't share - no users to share with or can't get user list from Photon");
                     return false;
                 }
-                break;
-
-            case ConnectMethod.ColocationSession:
                 break;
         }
 
@@ -314,7 +314,7 @@ public class MRSceneManager : MonoBehaviour
         );
 
         Sampleton.Log(
-            $"... MRUK.LoadSceneFromSharedRooms: {result} ({(int)result})",
+            $"... MRUK.LoadSceneFromSharedRooms: {result.ForLogging()}",
             result == 0 ? LogType.Log : result > 0 ? LogType.Warning : LogType.Error
         );
     }
@@ -342,7 +342,7 @@ public class MRSceneManager : MonoBehaviour
         );
 
         Sampleton.Log(
-            $"MRUK.LoadSceneFromDevice: {result} ({(int)result})",
+            $"MRUK.LoadSceneFromDevice: {result.ForLogging()}",
             result == 0 ? LogType.Log : result > 0 ? LogType.Warning : LogType.Error
         );
     }
@@ -355,15 +355,15 @@ public class MRSceneManager : MonoBehaviour
         // TODO if scene ownership is mixed and shared to the same group UUID, this probably doesn't work as-is.
 
         var groupId = GetSharedGroupId();
-        var task = await mruk.ShareRoomsAsync(mruk.Rooms, groupId);
-        if (!task.Success)
+        var result = await mruk.ShareRoomsAsync(mruk.Rooms, groupId);
+        if (!result.Success)
         {
-            Sampleton.Error($"{nameof(ShareLocalScene)} FAILED: {task.Status}({(int)task.Status})");
+            Sampleton.Error($"{nameof(ShareLocalScene)} FAILED: {result.Status.ForLogging()}");
             return;
         }
 
         Sampleton.Log(
-            $"{nameof(ShareLocalScene)}: {task.Status}({(int)task.Status})\n" +
+            $"{nameof(ShareLocalScene)}: {result.Status.ForLogging()}\n" +
             $"to group: {groupId}"
         );
 
@@ -383,7 +383,8 @@ public class MRSceneManager : MonoBehaviour
             }
         }
 
-        var floor = curRoom.FloorAnchor.transform;
+        var floor = curRoom.FloorAnchors.Count > 0 ? curRoom.FloorAnchors[0].transform
+                                                   : curRoom.transform;
         var floorPose = new Pose(floor.position, floor.rotation);
 
         SetHostAlignment((curRoom.Anchor.Uuid, floorPose));

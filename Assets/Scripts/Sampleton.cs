@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+using Meta.XR.Samples;
+
 using JetBrains.Annotations;
 
 using Meta.XR.MRUtilityKit;
@@ -22,6 +24,7 @@ using StringBuilder = System.Text.StringBuilder;
 /// <summary>
 /// Central singleton for sample scene setup and shared state.
 /// </summary>
+[MetaCodeSample("SpaceSharing")]
 public class Sampleton : MonoBehaviour
 {
     //
@@ -396,13 +399,6 @@ public class Sampleton : MonoBehaviour
                     m_PhotonMan = new GameObject(nameof(PhotonRoomManager)).AddComponent<PhotonRoomManager>();
                 }
                 break;
-
-            case ConnectMethod.ColocationSession:
-                if (!m_MenuUI)
-                {
-                    throw new System.NotImplementedException();
-                }
-                break;
         }
 
         // ensure logs start at the last page
@@ -466,7 +462,6 @@ public class Sampleton : MonoBehaviour
                 break;
 
             default:
-            case ConnectMethod.ColocationSession:
                 SceneManager.LoadScene(0);
                 break;
         }

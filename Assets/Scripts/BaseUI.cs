@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+using Meta.XR.Samples;
+
 using Meta.XR.MRUtilityKit;
 
 using System.Collections;
@@ -9,6 +11,7 @@ using UnityEngine.Events;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
 
+[MetaCodeSample("SpaceSharing")]
 public class BaseUI : MonoBehaviour
 {
     //

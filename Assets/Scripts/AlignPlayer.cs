@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+using Meta.XR.Samples;
+
 using Meta.XR.MRUtilityKit;
 
 using UnityEngine;
@@ -7,6 +9,7 @@ using UnityEngine.Events;
 
 
 [System.Obsolete("As of v81, MRUK no longer allows clients to manually align MRUKAnchors.")]
+[MetaCodeSample("SpaceSharing")]
 public class AlignPlayer : MonoBehaviour
 {
     [SerializeField]

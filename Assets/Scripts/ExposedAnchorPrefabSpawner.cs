@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+using Meta.XR.Samples;
+
 using Meta.XR.MRUtilityKit;
 
 /// <summary>
@@ -10,6 +12,7 @@ using Meta.XR.MRUtilityKit;
 /// <remarks>
 ///   Sealed = the madness ends here.
 /// </remarks>
+[MetaCodeSample("SpaceSharing")]
 public sealed class ExposedAnchorPrefabSpawner : AnchorPrefabSpawner
 {
 

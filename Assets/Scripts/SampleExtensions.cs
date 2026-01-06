@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+using Meta.XR.Samples;
+
 using JetBrains.Annotations;
 
 using Meta.XR.MRUtilityKit;
@@ -10,6 +12,7 @@ using System.Text;
 using UnityEngine;
 
 
+[MetaCodeSample("SpaceSharing")]
 static class SampleExtensions
 {
 
@@ -66,29 +69,48 @@ static class SampleExtensions
 
 
     public static string ForLogging(this MRUK.LoadDeviceResult status)
-        => $"{status}({(int)status})"; // MRUK overrides OVRPlugin.Result values with other meanings
+        => StatusForLogging(status, details: false, color: true);
 
-    public static string ForLogging(this OVRSpatialAnchor.OperationResult status, bool details = true)
-        => StatusForLogging(status, details);
+    public static string ForLogging(this OVRAnchor.ShareResult status)
+        => StatusForLogging(status, details: true, color: true);
 
-    public static string ForLogging(this OVRColocationSession.Result status, bool details = true)
-        => StatusForLogging(status, details);
 
-    public static string ForLogging(this OVRAnchor.EraseResult status, bool details = true)
-        => StatusForLogging(status, details);
+    public static string StatusForLogging<T>(T status, bool details, bool color = true)
+        where T : struct, Enum
+    {
+        s_StrBuf.Clear();
 
-    public static string ForLogging(this OVRAnchor.SaveResult status, bool details = true)
-        => StatusForLogging(status, details);
+        int raw = (int)(object)status;
+        if (color)
+        {
+            switch (raw)
+            {
+                case < 0:
+                    s_StrBuf.Append("<color=#F06080FF>"); // "Alert" red
+                    break;
+                case > 0:
+                    s_StrBuf.Append("<color=#F09606FF>"); // "Warn" yellow
+                    break;
+                default:
+                    s_StrBuf.Append("<color=#80FF87FF>"); // "Noice" green
+                    break;
+            }
+        }
 
-    public static string ForLogging(this OVRAnchor.ShareResult status, bool details = true)
-        => StatusForLogging(status, details);
+        if (Enum.GetName(typeof(T), status) is { Length: > 0 } namedStatus && char.IsLetter(namedStatus[0]))
+            s_StrBuf.Append(namedStatus);
+        else
+            s_StrBuf.Append((OVRPlugin.Result)(object)status);
+        s_StrBuf.AppendFormat("({0})", raw);
 
-    public static string ForLogging(this OVRAnchor.FetchResult status, bool details = true)
-        => StatusForLogging(status, details);
+        if (color)
+            s_StrBuf.Append("</color>");
 
-    public static string StatusForLogging<T>(T status, bool details) where T : struct, Enum
-        => details ? $"{(OVRPlugin.Result)(object)status}({(int)(object)status}){StatusExtraDetails(status)}"
-                   : $"{(OVRPlugin.Result)(object)status}({(int)(object)status})";
+        if (details)
+            s_StrBuf.Append(StatusExtraDetails(status));
+
+        return s_StrBuf.ToString();
+    }
 
     public static string StatusExtraDetails<T>(T status) where T : struct, Enum
     {
@@ -126,5 +148,11 @@ static class SampleExtensions
 
         return string.Empty;
     }
+
+
+    //
+    // impl. details
+
+    static readonly StringBuilder s_StrBuf = new();
 
 } // end static class SampleExtensions

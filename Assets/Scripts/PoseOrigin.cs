@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+using Meta.XR.Samples;
+
 using System.Collections;
 using System.Collections.Generic;
 
@@ -8,6 +10,10 @@ using TMPro;
 using UnityEngine;
 
 
+/// <summary>
+///   Used to visualize non-anchor poses in world or local space.
+/// </summary>
+[MetaCodeSample("SpaceSharing")]
 public class PoseOrigin : MonoBehaviour
 {
     public enum DisplayMode

@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+using Meta.XR.Samples;
+
 using Photon.Pun;
 using Photon.Realtime;
 
@@ -16,6 +18,7 @@ using TMPro;
 using Guid = System.Guid;
 
 
+[MetaCodeSample("SpaceSharing")]
 public class LocalSpaceSharingUI : BaseUI
 {
     //
@@ -75,7 +78,7 @@ public class LocalSpaceSharingUI : BaseUI
 
         Sampleton.Log($"{nameof(OnCreateRoomBtn)}:");
 
-        if (!PhotonRoomManager.CheckConnection(warn: true))
+        if (!PhotonRoomManager.CheckConnection(tryReconnect: true, logOnFail: true))
             return;
 
         string username = Sampleton.GetNickname();
@@ -95,7 +98,7 @@ public class LocalSpaceSharingUI : BaseUI
 
         Sampleton.Log(nameof(OnFindRoomsBtn));
 
-        if (!PhotonRoomManager.CheckConnection(warn: true))
+        if (!PhotonRoomManager.CheckConnection(tryReconnect: true, logOnFail: true))
             return;
 
         m_RoomListPanel.SetActive(true);
