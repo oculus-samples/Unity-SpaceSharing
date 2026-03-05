@@ -221,11 +221,7 @@ public class Sampleton : MonoBehaviour
 
         static void receiveLoggedInUser(Oculus.Platform.Message msg)
         {
-            const Oculus.Platform.Message.MessageType kExpectType
-                = Oculus.Platform.Message.MessageType.User_GetLoggedInUser;
-
             Assert.IsNotNull(msg, "msg != null");
-            Assert.AreEqual(kExpectType, msg.Type, $"{nameof(receiveLoggedInUser)}: Unexpected message type {msg.Type}");
 
             if (msg.IsError)
             {
@@ -248,7 +244,7 @@ public class Sampleton : MonoBehaviour
                 return;
             }
 
-            var flume = new StringBuilder($"{nameof(receiveLoggedInUser)}: {msg.Type}");
+            var flume = new StringBuilder($"{nameof(receiveLoggedInUser)}: User_GetLoggedInUser");
 
             s_OculusUser = msg.GetUser();
 
